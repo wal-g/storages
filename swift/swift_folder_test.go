@@ -1,10 +1,12 @@
 package swift
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/wal-g/storages/storage"
 	"os"
 	"testing"
+
+	"github.com/wal-g/storages/storage"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var settings = map[string]string{

@@ -2,13 +2,15 @@ package memory
 
 import (
 	"bytes"
-	"github.com/pkg/errors"
-	"github.com/wal-g/storages/storage"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/wal-g/storages/storage"
+
+	"github.com/pkg/errors"
 )
 
 type Folder struct {

@@ -1,6 +1,8 @@
 package storage
 
-import "time"
+import (
+	"time"
+)
 
 type LocalObject struct {
 	name         string

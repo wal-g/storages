@@ -2,14 +2,15 @@ package swift
 
 import (
 	"bytes"
-	"github.com/wal-g/storages/storage"
-	"github.com/tinsane/tracelog"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
 
+	"github.com/wal-g/storages/storage"
+
 	"github.com/ncw/swift"
+	"github.com/tinsane/tracelog"
 )
 
 var SettingList = []string{

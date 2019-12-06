@@ -2,16 +2,17 @@ package gcs
 
 import (
 	"context"
-	"github.com/pkg/errors"
-	"github.com/tinsane/tracelog"
-	"github.com/wal-g/storages/storage"
 	"io"
 	"io/ioutil"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/wal-g/storages/storage"
+
 	gcs "cloud.google.com/go/storage"
+	"github.com/pkg/errors"
+	"github.com/tinsane/tracelog"
 	"google.golang.org/api/iterator"
 )
 

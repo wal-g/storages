@@ -2,11 +2,12 @@ package storage
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func RunFolderTest(storageFolder Folder, t *testing.T) {

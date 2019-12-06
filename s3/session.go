@@ -1,6 +1,13 @@
 package s3
 
 import (
+	"io/ioutil"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
@@ -9,12 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/pkg/errors"
 	"github.com/tinsane/tracelog"
-	"io/ioutil"
-	"net"
-	"net/http"
-	"os"
-	"strconv"
-	"strings"
 )
 
 const DefaultPort = "443"
