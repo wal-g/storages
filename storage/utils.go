@@ -25,7 +25,7 @@ func AddDelimiterToPath(path string) string {
 
 // TODO : unit tests
 func GetPathFromPrefix(prefix string) (bucket, server string, err error) {
-	bucket, server, err = ParsePrefixAsURL(prefix);
+	bucket, server, err = ParsePrefixAsURL(prefix)
 	if err != nil {
 		return "", "", err
 	}

@@ -11,9 +11,9 @@ import (
 
 	"github.com/wal-g/storages/storage"
 
-	"github.com/tinsane/tracelog"
 	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/pkg/errors"
+	"github.com/tinsane/tracelog"
 )
 
 const (
@@ -194,8 +194,6 @@ func (folder *Folder) DeleteObjects(objectRelativePaths []string) error {
 		}
 		if err != nil {
 			return NewFolderError(err, "Unable to delete object %v", path)
-		} else {
-			//blob is deleted
 		}
 	}
 	return nil

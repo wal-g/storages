@@ -40,15 +40,15 @@ func TestListFolderRecursively(t *testing.T) {
 func CreateMockStorageFolder() storage.Folder {
 	var folder = memory.NewFolder("in_memory/", memory.NewStorage())
 	subFolder := folder.GetSubFolder("basebackups_005/")
-	subFolder.PutObject("base_123_backup_stop_sentinel.json", &bytes.Buffer{})
-	subFolder.PutObject("base_456_backup_stop_sentinel.json", strings.NewReader("{}"))
-	subFolder.PutObject("base_000_backup_stop_sentinel.json", &bytes.Buffer{}) // last put
-	subFolder.PutObject("base_123312", &bytes.Buffer{})                        // not a sentinel
-	subFolder.PutObject("base_321/nop", &bytes.Buffer{})
-	subFolder.PutObject("folder123/nop", &bytes.Buffer{})
-	subFolder.PutObject("base_456/tar_partitions/1", &bytes.Buffer{})
-	subFolder.PutObject("base_456/tar_partitions/2", &bytes.Buffer{})
-	subFolder.PutObject("base_456/tar_partitions/3", &bytes.Buffer{})
+	_ = subFolder.PutObject("base_123_backup_stop_sentinel.json", &bytes.Buffer{})
+	_ = subFolder.PutObject("base_456_backup_stop_sentinel.json", strings.NewReader("{}"))
+	_ = subFolder.PutObject("base_000_backup_stop_sentinel.json", &bytes.Buffer{}) // last put
+	_ = subFolder.PutObject("base_123312", &bytes.Buffer{})                        // not a sentinel
+	_ = subFolder.PutObject("base_321/nop", &bytes.Buffer{})
+	_ = subFolder.PutObject("folder123/nop", &bytes.Buffer{})
+	_ = subFolder.PutObject("base_456/tar_partitions/1", &bytes.Buffer{})
+	_ = subFolder.PutObject("base_456/tar_partitions/2", &bytes.Buffer{})
+	_ = subFolder.PutObject("base_456/tar_partitions/3", &bytes.Buffer{})
 	return folder
 }
 
