@@ -1,3 +1,6 @@
+lint:
+	golangci-lint run -v
+
 unittest:
 	go list ./... | grep -Ev 'vendor|submodules|tmp' | xargs go vet
 	go test -v $(TEST_MODIFIER) ./azure/
