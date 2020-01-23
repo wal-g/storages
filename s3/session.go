@@ -86,11 +86,7 @@ func getDefaultConfig(settings map[string]string) *aws.Config {
 	// DefaultRetryer implements basic retry logic using exponential backoff for
 	// most services. If you want to implement custom retry logic, you can implement the
 	// request.Retryer interface.
-	config := defaults.Get().Config.
-		WithRegion(settings[RegionSetting]).
-		WithLogger(aws.LoggerFunc(tracelog.ErrorLogger.Println)).
-		WithLogLevel(aws.LogDebugWithRequestErrors | aws.LogDebugWithRequestRetries)
-
+	config := defaults.Get().Config.WithRegion(settings[RegionSetting])
 	config = request.WithRetryer(config, client.DefaultRetryer{NumMaxRetries: MaxRetries})
 
 	provider := &credentials.StaticProvider{Value: credentials.Value{
