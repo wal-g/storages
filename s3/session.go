@@ -1,21 +1,21 @@
 package s3
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/defaults"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/pkg/errors"
-	"github.com/wal-g/tracelog"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
+	"github.com/aws/aws-sdk-go/aws/defaults"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/pkg/errors"
+	"github.com/wal-g/tracelog"
 )
 
 const DefaultPort = "443"
@@ -86,23 +86,8 @@ func getDefaultConfig(settings map[string]string) *aws.Config {
 	// DefaultRetryer implements basic retry logic using exponential backoff for
 	// most services. If you want to implement custom retry logic, you can implement the
 	// request.Retryer interface.
-	config := defaults.Get().Config.WithRegion(settings[RegionSetting])
+	config := defaults.Get().Config
 	config = request.WithRetryer(config, client.DefaultRetryer{NumMaxRetries: MaxRetries})
-
-	provider := &credentials.StaticProvider{Value: credentials.Value{
-		AccessKeyID:     getFirstSettingOf(settings, []string{AccessKeyIdSetting, AccessKeySetting}),
-		SecretAccessKey: getFirstSettingOf(settings, []string{SecretAccessKeySetting, SecretKeySetting}),
-		SessionToken:    settings[SessionTokenSetting],
-	}}
-	providers := make([]credentials.Provider, 0)
-	providers = append(providers, provider)
-	providers = append(providers, defaults.CredProviders(config, defaults.Handlers())...)
-	newCredentials := credentials.NewCredentials(&credentials.ChainProvider{
-		VerboseErrors: aws.BoolValue(config.CredentialsChainVerboseErrors),
-		Providers:     providers,
-	})
-
-	config = config.WithCredentials(newCredentials)
 
 	if endpoint, ok := settings[EndpointSetting]; ok {
 		config = config.WithEndpoint(endpoint)
