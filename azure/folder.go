@@ -34,6 +34,7 @@ var SettingList = []string{
 	AccessKeySetting,
 	BufferSizeSetting,
 	MaxBuffersSetting,
+	TryTimeoutSetting,
 }
 
 func NewFolderError(err error, format string, args ...interface{}) storage.Error {
