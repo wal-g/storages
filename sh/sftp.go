@@ -32,3 +32,4 @@ func (client *extendedSftpClient) Create(path string) (io.Writer, error) {
 func extend(client *sftp.Client) *extendedSftpClient {
 	return &extendedSftpClient{client}
 }
+
