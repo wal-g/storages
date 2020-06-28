@@ -13,20 +13,25 @@ type SftpClient interface {
 	Join(elem ...string) string
 	Remove(path string) error
 	Stat(p string) (os.FileInfo, error)
-	Open(path string) (io.ReadCloser, error)
-	Create(path string) (io.Writer, error)
+	OpenFile(path string) (io.ReadCloser, error)
+	CreateFile(path string) (io.Writer, error)
+	Mkdir(path string) error
 }
 
 type extendedSftpClient struct {
 	*sftp.Client
 }
 
-func (client *extendedSftpClient) Open(path string) (io.ReadCloser, error) {
+func (client *extendedSftpClient) OpenFile(path string) (io.ReadCloser, error) {
 	return client.Open(path)
 }
 
-func (client *extendedSftpClient) Create(path string) (io.Writer, error) {
+func (client *extendedSftpClient) CreateFile(path string) (io.Writer, error) {
 	return client.Create(path)
+}
+
+func (client *extendedSftpClient) Mkdir(path string) error {
+	return client.MkdirAll(path)
 }
 
 func extend(client *sftp.Client) *extendedSftpClient {

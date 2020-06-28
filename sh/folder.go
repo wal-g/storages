@@ -6,6 +6,8 @@ import (
 	"github.com/wal-g/tracelog"
 	"golang.org/x/crypto/ssh"
 	"io"
+	"fmt"
+	"path/filepath"
 )
 
 type Folder struct {
@@ -13,21 +15,32 @@ type Folder struct {
 	path string
 }
 
+const (
+	Port = "SSH_PORT"
+	Password = "SSH_PASSWORD"
+	Username = "SSH_USERNAME"
+)
+
+var SettingsList = []string{
+	Port,
+	Password,
+	Username,
+};
+
 func NewFolderError(err error, format string, args ...interface{}) storage.Error {
 	return storage.NewError(err, "SSH", format, args...)
 }
 
 func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder, error) {
-	host, path, err := storage.GetPathFromPrefix(prefix)
+	host, path, err := storage.ParsePrefixAsURL(prefix)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO parse from settings
-	user := "user"
-	pass := ""
-	port := ":22"
+	user := settings[Username]
+	pass := settings[Password]
+	port := settings[Port]
 
 	config := &ssh.ClientConfig{
 		User: user,
@@ -37,7 +50,7 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	address := host + port
+	address := fmt.Sprint(host, ":", port)
 	sshClient, err := ssh.Dial("tcp", address, config)
 	if err != nil {
 		return nil, NewFolderError(err, "Fail connect via ssh. Address: %s", address)
@@ -95,7 +108,7 @@ func (folder *Folder) ListFolder() (objects []storage.Object, subFolders []stora
 	return
 }
 
-func (folder *Folder) DeleteObjects(objectRelativePaths []string) error {
+func (folder *Folder) DeleteObjects(objectRelativePaths []string) error { 
 	client := folder.client
 
 	for _, relativePath := range objectRelativePaths {
@@ -111,7 +124,7 @@ func (folder *Folder) DeleteObjects(objectRelativePaths []string) error {
 }
 
 func (folder *Folder) Exists(objectRelativePath string) (bool, error)  {
-	path := folder.client.Join()
+	path := filepath.Join(folder.path, objectRelativePath)
 	_, err := folder.client.Stat(path)
 
 	if err != nil {
@@ -132,7 +145,7 @@ func (folder *Folder) GetSubFolder(subFolderRelativePath string) storage.Folder 
 
 func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, error) {
 	path := folder.client.Join(folder.path, objectRelativePath)
-	file, err := folder.client.Open(path)
+	file, err := folder.client.OpenFile(path)
 
 	if err != nil {
 		return nil, NewFolderError(err, "Fail open file '%s'", path)
@@ -143,16 +156,31 @@ func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, erro
 
 func (folder *Folder) PutObject(name string, content io.Reader) error {
 	client := folder.client
-	path := client.Join(folder.path, name)
+	absolutePath := filepath.Join(folder.path, name)
 
-	file, err := client.Create(path)
+	dirPath := filepath.Dir(absolutePath)
+	err := client.Mkdir(dirPath)
 	if err != nil {
-		return NewFolderError(err, "Fail create file '%s'", path)
+		return NewFolderError(
+			err, "Fail to create directory '%s'", 
+			dirPath,
+		)
+	}
+
+	file, err := client.CreateFile(absolutePath)
+	if err != nil {
+		return NewFolderError(
+			err, "Fail to create file '%s'", 
+			absolutePath,
+		)
 	}
 
 	_, err = io.Copy(file, content)
 	if err != nil {
-		return NewFolderError(err, "Fail write content to file '%s'", path)
+		return NewFolderError(
+			err, "Fail write content to file '%s'", 
+			absolutePath,
+		)
 	}
 
 	return nil
