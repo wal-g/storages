@@ -6,6 +6,8 @@ import (
 	"github.com/wal-g/tracelog"
 	"golang.org/x/crypto/ssh"
 	"io"
+	"io/ioutil"
+	"os"
 	"fmt"
 	"path/filepath"
 )
@@ -19,12 +21,14 @@ const (
 	Port = "SSH_PORT"
 	Password = "SSH_PASSWORD"
 	Username = "SSH_USERNAME"
+	PrivateKeyPath = "SSH_PRIVATE_KEY_PATH"
 )
 
 var SettingsList = []string{
 	Port,
 	Password,
 	Username,
+	PrivateKeyPath,
 };
 
 func NewFolderError(err error, format string, args ...interface{}) storage.Error {
@@ -41,12 +45,34 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 	user := settings[Username]
 	pass := settings[Password]
 	port := settings[Port]
+	pkeyPath := settings[PrivateKeyPath]
+
+	if port == "" {
+		port = "22"
+	}
+
+	authMethods := []ssh.AuthMethod{}
+	if pkeyPath != "" {
+		pkey, err := ioutil.ReadFile(pkeyPath)
+		if err != nil {
+			return nil, NewFolderError(err, "Unable to read private key: %v", err)
+		}
+
+		signer, err := ssh.ParsePrivateKey(pkey)
+		if err != nil {
+			return nil, NewFolderError(err, "Unable to parse private key: %v", err)
+		}
+
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+
+	if pass != "" {
+		authMethods = append(authMethods, ssh.Password(pass))
+	}
 
 	config := &ssh.ClientConfig{
 		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(pass),
-		},
+		Auth: authMethods,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
@@ -84,6 +110,13 @@ func (folder *Folder) ListFolder() (objects []storage.Object, subFolders []stora
 
 	filesInfo, err := client.ReadDir(folder.path)
 
+	if os.IsNotExist(err) {
+		// Folder does not exists, it means where are no objects in folder
+		tracelog.InfoLogger.Println("\tskipped " + folder.path + ": " + err.Error())
+		err = nil
+		return
+	}
+
 	if err != nil {
 		return nil, nil,
 			NewFolderError(err, "Fail read folder '%s'", path)
@@ -96,6 +129,8 @@ func (folder *Folder) ListFolder() (objects []storage.Object, subFolders []stora
 				client.Join(path, fileInfo.Name()),
 			}
 			subFolders = append(subFolders, folder)
+			// Folder is not object, just skip it
+			continue
 		}
 
 		object := storage.NewLocalObject(
@@ -115,9 +150,19 @@ func (folder *Folder) DeleteObjects(objectRelativePaths []string) error {
 	for _, relativePath := range objectRelativePaths {
 		path := client.Join(folder.path, relativePath)
 
-		err := client.Remove(path)
+		stat, err := client.Stat(path)
 		if err != nil {
-			return NewFolderError(err, "Fail delete object '%s'", path)
+			return NewFolderError(err, "Fail to get object stat '%s': %v", path, err)
+		}
+
+		// Do not try to remove directory. It may be not empty. TODO: remove if empty
+		if stat.IsDir() {
+			continue
+		}
+
+		err = client.Remove(path)
+		if err != nil {
+			return NewFolderError(err, "Fail delete object '%s': %v", path, err)
 		}
 	}
 
@@ -149,7 +194,7 @@ func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, erro
 	file, err := folder.client.OpenFile(path)
 
 	if err != nil {
-		return nil, NewFolderError(err, "Fail open file '%s'", path)
+		return nil, storage.NewObjectNotFoundError(path)
 	}
 
 	return file, nil
