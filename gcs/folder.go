@@ -191,7 +191,7 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 	ctx, cancel := folder.createTimeoutContext()
 	defer cancel()
 
-	uploader := NewUploader(object.NewWriter(ctx))
+	uploader := NewUploader(object.NewWriter(ctx), object)
 
 	chunkNum := 0
 	dataChunk := uploader.allocateBuffer()

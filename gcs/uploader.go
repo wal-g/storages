@@ -18,6 +18,7 @@ const (
 
 type Uploader struct {
 	writer           *storage.Writer
+	objHandle        *storage.ObjectHandle
 	maxChunkSize     int64
 	writePosition    int64
 	baseRetryDelay   time.Duration
@@ -34,8 +35,9 @@ type chunk struct {
 	size  int
 }
 
-func NewUploader(writer *storage.Writer, options ...UploaderOptions) *Uploader {
+func NewUploader(writer *storage.Writer, objH *storage.ObjectHandle, options ...UploaderOptions) *Uploader {
 	u := &Uploader{
+		objHandle:        objH,
 		writer:           writer,
 		maxChunkSize:     defaultMaxChunkSize,
 		baseRetryDelay:   BaseRetryDelay,
@@ -67,6 +69,11 @@ func (u *Uploader) uploadChunk(ctx context.Context, chunk chunk) error {
 	u.writePosition = 0
 
 	for retry := 0; retry <= u.maxUploadRetries; retry++ {
+		if retry%5 == 0 {
+			u.writer = u.objHandle.NewWriter(ctx)
+			tracelog.InfoLogger.Println("Update writer")
+		}
+
 		bufReader := bytes.NewReader(chunk.data[u.writePosition:chunk.size])
 
 		n, err := io.Copy(u.writer, bufReader)
