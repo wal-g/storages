@@ -69,7 +69,11 @@ func (u *Uploader) uploadChunk(ctx context.Context, chunk chunk) error {
 	u.writePosition = 0
 
 	for retry := 0; retry <= u.maxUploadRetries; retry++ {
-		if retry%5 == 0 {
+		if retry > 0 && retry%5 == 0 {
+			if err := u.writer.Close(); err != nil {
+				tracelog.ErrorLogger.Printf("Error on close writer: %v", err)
+			}
+
 			u.writer = u.objHandle.NewWriter(ctx)
 			tracelog.InfoLogger.Println("Update writer")
 		}
