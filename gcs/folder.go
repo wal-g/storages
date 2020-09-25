@@ -39,6 +39,7 @@ var (
 	SettingList = []string{
 		ContextTimeout,
 		NormalizePrefix,
+		ChunkSize,
 	}
 )
 
