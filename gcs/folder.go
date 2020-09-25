@@ -15,12 +15,15 @@ import (
 	"github.com/wal-g/storages/storage"
 
 	gcs "cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 )
 
 const (
 	ContextTimeout        = "GCS_CONTEXT_TIMEOUT"
 	NormalizePrefix       = "GCS_NORMALIZE_PREFIX"
+	ChunkSize             = "GCS_CHUNK_SIZE"
+	defaultChunkSize      = googleapi.DefaultUploadChunkSize
 	defaultContextTimeout = 60 * 60 // 1 hour
 	maxRetryDelay         = 5 * time.Minute
 )
@@ -43,8 +46,8 @@ func NewError(err error, format string, args ...interface{}) storage.Error {
 	return storage.NewError(err, "GCS", format, args...)
 }
 
-func NewFolder(bucket *gcs.BucketHandle, path string, contextTimeout int, normalizePrefix bool) *Folder {
-	return &Folder{bucket, path, contextTimeout, normalizePrefix}
+func NewFolder(bucket *gcs.BucketHandle, path string, contextTimeout, chunkSize int, normalizePrefix bool) *Folder {
+	return &Folder{bucket, path, contextTimeout, chunkSize, normalizePrefix}
 }
 
 func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder, error) {
@@ -91,7 +94,16 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 			return nil, NewError(err, "Unable to parse Context Timeout %v", prefix)
 		}
 	}
-	return NewFolder(bucket, path, contextTimeout, normalizePrefix), nil
+
+	chunkSize := defaultChunkSize
+	if chunkSizeStr, ok := settings[ChunkSize]; ok {
+		chunkSize, err = strconv.Atoi(chunkSizeStr)
+		if err != nil {
+			return nil, NewError(err, "Unable to parse Chunk Size %v", prefix)
+		}
+	}
+
+	return NewFolder(bucket, path, contextTimeout, chunkSize, normalizePrefix), nil
 }
 
 // Folder represents folder in GCP
@@ -99,6 +111,7 @@ type Folder struct {
 	bucket          *gcs.BucketHandle
 	path            string
 	contextTimeout  int
+	chunkSize       int
 	normalizePrefix bool
 }
 
@@ -123,7 +136,10 @@ func (folder *Folder) ListFolder() (objects []storage.Object, subFolders []stora
 
 			if objAttrs.Prefix != prefix+"/" {
 				// Sometimes GCS returns "//" folder - skip it
-				subFolders = append(subFolders, NewFolder(folder.bucket, objAttrs.Prefix, folder.contextTimeout, folder.normalizePrefix))
+				subFolders = append(
+					subFolders,
+					NewFolder(folder.bucket, objAttrs.Prefix, folder.contextTimeout, folder.chunkSize, folder.normalizePrefix),
+				)
 			}
 		} else {
 			objName := strings.TrimPrefix(objAttrs.Name, prefix)
@@ -171,7 +187,10 @@ func (folder *Folder) Exists(objectRelativePath string) (bool, error) {
 }
 
 func (folder *Folder) GetSubFolder(subFolderRelativePath string) storage.Folder {
-	return NewFolder(folder.bucket, folder.joinPath(folder.path, subFolderRelativePath), folder.contextTimeout, folder.normalizePrefix)
+	return NewFolder(
+		folder.bucket, folder.joinPath(folder.path, subFolderRelativePath),
+		folder.contextTimeout, folder.chunkSize, folder.normalizePrefix,
+	)
 }
 
 func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, error) {
@@ -191,7 +210,10 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 	ctx, cancel := folder.createTimeoutContext()
 	defer cancel()
 
-	uploader := NewUploader(object.NewWriter(ctx))
+	uploaderWriter := object.NewWriter(ctx)
+	uploaderWriter.ChunkSize = folder.chunkSize
+
+	uploader := NewUploader(uploaderWriter)
 
 	chunkNum := 0
 	dataChunk := uploader.allocateBuffer()
