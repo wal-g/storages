@@ -1,6 +1,7 @@
 package gcs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -25,7 +26,11 @@ var failedSecond int
 // total upload size
 var totalSize int
 
-func TestUploadChunk(t *testing.T) {
+func TestFolder_PutObject(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip("A long running test for retries")
+	}
 
 	tests := []struct {
 		name       string
@@ -38,8 +43,18 @@ func TestUploadChunk(t *testing.T) {
 		{"SecondChunkFailsOnce", 0, 1, false},
 		{"FirstAndSecondChunkFailOnce", 1, 1, false},
 		{"FirstAndSecondChunkFail3times", 3, 3, false},
-		//{"SecondChunkFails11times", 0, 11, false},
-		{"FirstChunkFails11times", 11, 0, false},
+		{"SecondChunkFails11times", 0, 11, false}, // 1 retry
+		{"FirstChunkFails11times", 11, 0, false},  // 1 retry
+		{"FirstChunkFails22times", 22, 0, false},  // 2 retries
+		{"FirstChunkFails44times", 44, 0, true},   // 4 retries - exceeds retry limit and should fail
+	}
+
+	buf := make([]byte, 40*1024*1024) // simulate 40MiB file
+	totalSize = len(buf)
+
+	n, err := rand.Read(buf)
+	if err != nil {
+		t.Fatalf("Failed to fill buffer with random data: %v, %d", err, n)
 	}
 
 	for _, testcase := range tests {
@@ -49,72 +64,29 @@ func TestUploadChunk(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		w := mockStorageWriter(ctx, t, testcase.failFirst, testcase.failSecond)
+		writerFunc := mockWriterFunc(ctx, testcase.failFirst, testcase.failSecond)
 
-		u := NewUploader(w)
-		u.maxUploadRetries = 3
+		content := bytes.NewBuffer(buf)
 
-		// nr of 20MiB chunks (we are simulating a 40MiB file)
-		nrUploadChunks := 2
-		totalSize = nrUploadChunks * defaultMaxChunkSize
-
-		for i := 0; i < nrUploadChunks; i++ {
-			dataChunk := u.allocateBuffer()
-			n, err := rand.Read(dataChunk)
-			if err != nil {
-				t.Fatalf("Failed to fill chunk with random data: %v, %d", err, n)
+		err := putObject(ctx, "testfile", content, writerFunc, 3)
+		if err != nil {
+			if !testcase.expectFail {
+				t.Fatalf("Expected %s to succeed after %d first chunk errors and %d second chunk errors but putObject() failed: %v",
+					testcase.name, testcase.failFirst, testcase.failSecond, err)
 			}
-
-			chunk := chunk{
-				name:  "chunk",
-				index: 0,
-				data:  dataChunk,
-				size:  n,
-			}
-
-			if err := u.uploadChunk(ctx, chunk); err != nil {
-				if !testcase.expectFail {
-					t.Fatalf("Expected upload %s to succeed after %d first chunk errors and %d second chunk errors but uploader.uploadChunk() failed: %v",
-						testcase.name, testcase.failFirst, testcase.failSecond, err)
-				}
-			} else {
-				if testcase.expectFail {
-					t.Fatalf("Expected upload %s to fail with %d first chunk errors and %d second chunk errors, but did not get an error.",
-						testcase.name, testcase.failFirst, testcase.failSecond)
-				}
-			}
-
-			u.resetBuffer(&dataChunk)
-		}
-
-		closeDone := make(chan error, 1)
-		go func() {
-			// Invoking w.Close() to ensure that this triggers completion of the upload.
-			// writer.Write() is async, so we only can be sure that it succeeded after closing
-			// the writer.
-			closeDone <- w.Close()
-		}()
-
-		// Given that the ExponentialBackoff is 30 seconds from a start of 100ms,
-		// let's wait for a maximum of 5 minutes to account for (2**n) increments
-		// between [100ms, 30s].
-		maxWait := 5 * time.Minute
-		select {
-		case <-time.After(maxWait):
-			t.Fatalf("Test took longer than %s to return", maxWait)
-		case err := <-closeDone:
+		} else {
 			if testcase.expectFail {
-				if err == nil {
-					t.Fatalf("Expected upload %s to fail with %d first chunk errors and %d second chunk errors, but did not get an error.",
-						testcase.name, testcase.failFirst, testcase.failSecond)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("Expected upload %s to succeed after %d first chunk errors and %d second chunk errors but finally failed when closing the Writer: %v",
-						testcase.name, testcase.failFirst, testcase.failSecond, err)
-				}
+				t.Fatalf("Expected %s to fail with %d first chunk errors and %d second chunk errors, but did not get an error.",
+					testcase.name, testcase.failFirst, testcase.failSecond)
 			}
 		}
+	}
+}
+
+// constructor for injecting dependencies
+func mockWriterFunc(ctx context.Context, failFirstCount, failSecondCount int) writerConstructor {
+	return func() *storage.Writer {
+		return mockStorageWriter(ctx, failFirstCount, failSecondCount)
 	}
 }
 
@@ -169,7 +141,7 @@ func parseContentRange(hdr http.Header, failFirstCount, failSecondCount int) (st
 // mockStorageWriter is setting up a httptest Server which can inject 503
 // responses and returns a storage.Writer pointing to its URL.
 // We can setup how often it will inject errors for the first or second chunk.
-func mockStorageWriter(ctx context.Context, t *testing.T, failFirstCount, failSecondCount int) *storage.Writer {
+func mockStorageWriter(ctx context.Context, failFirstCount, failSecondCount int) *storage.Writer {
 	uploadRoute := "/upload"
 
 	var resumableUploadIDs atomic.Value
@@ -255,7 +227,7 @@ func mockStorageWriter(ctx context.Context, t *testing.T, failFirstCount, failSe
 
 	sc, err := storage.NewClient(ctx, opts...)
 	if err != nil {
-		t.Fatalf("Failed to create storage client: %v", err)
+		panic(fmt.Sprintf("Failed to create storage client: %v", err))
 	}
 
 	obj := sc.Bucket("mock-bucket").Object("object")

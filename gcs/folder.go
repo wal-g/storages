@@ -1,20 +1,21 @@
 package gcs
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-	"github.com/wal-g/tracelog"
-
-	"github.com/wal-g/storages/storage"
-
 	gcs "cloud.google.com/go/storage"
+	"github.com/pkg/errors"
+	"github.com/wal-g/storages/storage"
+	"github.com/wal-g/tracelog"
 	"google.golang.org/api/iterator"
 )
 
@@ -184,52 +185,85 @@ func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, erro
 	return ioutil.NopCloser(reader), err
 }
 
+type writerConstructor func() *gcs.Writer
+
+// return a writerConstructor which is able to construct new writers from the given object
+func writerFromObject(ctx context.Context, object *gcs.ObjectHandle) writerConstructor {
+	return func() *gcs.Writer {
+		return object.NewWriter(ctx)
+	}
+}
+
 func (folder *Folder) PutObject(name string, content io.Reader) error {
-	tracelog.DebugLogger.Printf("Put %v into %v\n", name, folder.path)
-	object := folder.bucket.Object(folder.joinPath(folder.path, name))
 
 	ctx, cancel := folder.createTimeoutContext()
 	defer cancel()
 
-	uploader := NewUploader(object.NewWriter(ctx))
+	object := folder.bucket.Object(folder.joinPath(folder.path, name))
+	writerFunc := writerFromObject(ctx, object)
 
-	chunkNum := 0
-	dataChunk := uploader.allocateBuffer()
+	return putObject(ctx, name, content, writerFunc, MaxRetries)
+}
 
-	for {
-		n, err := fillBuffer(content, dataChunk)
-		if err != nil && err != io.EOF {
-			tracelog.ErrorLogger.Printf("Unable to read content of %s, err: %v", name, err)
-			return NewError(err, "Unable to read a chunk of data to upload")
+// helper to make testing easier by injecting dependencies
+func putObject(ctx context.Context, name string, content io.Reader, writerFunc writerConstructor, retries int) error {
+
+	timer := time.NewTimer(BaseRetryDelay)
+	defer func() {
+		timer.Stop()
+	}()
+
+	// we need to buffer the whole content to be able to retry uploading it on error
+	buf, err := ioutil.ReadAll(content)
+	if err != nil {
+		tracelog.ErrorLogger.Printf("Unable to read content of %s, err: %v", name, err)
+		return NewError(err, fmt.Sprintf("Unable to read content of %s", name))
+	}
+
+	tracelog.DebugLogger.Printf("Uploaded %v", name)
+
+	// we do our own retries if the gcs api client retries were not sufficient
+	for retry := 0; retry <= retries; retry++ {
+
+		writer := writerFunc()
+
+		err := upload(ctx, name, writer, buf, timer, retry)
+		if err == nil {
+			return nil
 		}
 
-		if n == 0 {
-			break
-		}
+		tempDelay := BaseRetryDelay * time.Duration(math.Exp2(float64(retry)))
+		sleepInterval := minDuration(maxRetryDelay, getJitterDelay(tempDelay/2))
 
-		chunk := chunk{
-			name:  name,
-			index: chunkNum,
-			data:  dataChunk,
-			size:  n,
-		}
+		timer.Reset(sleepInterval)
 
-		if err := uploader.uploadChunk(ctx, chunk); err != nil {
-			return NewError(err, "Unable to copy to object")
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
 		}
+	}
 
-		chunkNum++
-		uploader.resetBuffer(&dataChunk)
+	return errors.Errorf("retry limit has been exceeded, total attempts: %d", retries)
+}
 
-		if err == io.EOF {
-			break
-		}
+func upload(ctx context.Context, name string, writer *gcs.Writer, buf []byte, timer *time.Timer, retry int) error {
+
+	defer writer.Close()
+
+	bufReader := bytes.NewReader(buf)
+
+	if _, err := io.Copy(writer, bufReader); err != nil {
+		tracelog.ErrorLogger.Printf("Unable to copy to object %s, err: %v, retry attempt %d", name, err, retry)
+		return err
+	}
+
+	if err := writer.Close(); err != nil {
+		tracelog.ErrorLogger.Printf("Got error when closing writer for %s, err: %v, retry attempt %d", name, err, retry)
+		return err
 	}
 
 	tracelog.DebugLogger.Printf("Put %v done\n", name)
-	if err := uploader.writer.Close(); err != nil {
-		return NewError(err, "Unable to Close object")
-	}
 	return nil
 }
 

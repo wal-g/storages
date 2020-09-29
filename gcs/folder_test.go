@@ -52,7 +52,7 @@ func TestUploadingReaderFails(t *testing.T) {
 	}
 
 	err := folder.PutObject("name", fakeReader{})
-	assert.EqualError(t, err, "GCS error : Unable to read a chunk of data to upload: failed to fake read")
+	assert.EqualError(t, err, "GCS error : Unable to read content of name: failed to fake read")
 }
 
 func TestJitterDelay(t *testing.T) {
