@@ -18,6 +18,7 @@ require (
 	github.com/stretchr/testify v1.5.1
 	github.com/wal-g/tracelog v0.0.0-20190824100002-0ab2b054ff30
 	golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
+	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 	google.golang.org/api v0.28.0
 	gopkg.in/yaml.v2 v2.2.7 // indirect
 )
