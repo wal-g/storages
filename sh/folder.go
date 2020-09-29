@@ -5,6 +5,7 @@ import (
 	"github.com/wal-g/storages/storage"
 	"github.com/wal-g/tracelog"
 	"golang.org/x/crypto/ssh"
+	"bufio"
 	"io"
 	"io/ioutil"
 	"os"
@@ -22,6 +23,7 @@ const (
 	Password = "SSH_PASSWORD"
 	Username = "SSH_USERNAME"
 	PrivateKeyPath = "SSH_PRIVATE_KEY_PATH"
+	defaultBufferSize = 64 * 1024 * 1024
 )
 
 var SettingsList = []string{
@@ -197,7 +199,10 @@ func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, erro
 		return nil, storage.NewObjectNotFoundError(path)
 	}
 
-	return file, nil
+	return struct {
+		io.Reader
+		io.Closer
+	}{bufio.NewReaderSize(file, defaultBufferSize), file}, nil
 }
 
 func (folder *Folder) PutObject(name string, content io.Reader) error {
