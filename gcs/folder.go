@@ -191,10 +191,11 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 	ctx, cancel := folder.createTimeoutContext()
 	defer cancel()
 
-	uploader := NewUploader(object.NewWriter(ctx), object)
+	uploader := NewUploader(object.NewWriter(ctx))
 
 	chunkNum := 0
 	dataChunk := uploader.allocateBuffer()
+	tmpChunks := make([]*gcs.ObjectHandle, 0)
 
 	for {
 		n, err := fillBuffer(content, dataChunk)
@@ -207,29 +208,57 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 			break
 		}
 
+		tmpChunkName := folder.joinPath(name+"_chunks", "chunk"+strconv.Itoa(chunkNum))
+		objectChunk := folder.bucket.Object(folder.joinPath(folder.path, tmpChunkName))
+		uploader := NewUploader(objectChunk.NewWriter(ctx))
+
 		chunk := chunk{
-			name:  name,
+			name:  tmpChunkName,
 			index: chunkNum,
 			data:  dataChunk,
 			size:  n,
 		}
 
-		if err := uploader.uploadChunk(ctx, chunk); err != nil {
+		if err := uploader.retry(ctx, uploader.upload(chunk)); err != nil {
 			return NewError(err, "Unable to copy to object")
 		}
 
+		tmpChunks = append(tmpChunks, objectChunk)
+
 		chunkNum++
 		uploader.resetBuffer(&dataChunk)
+
+		if err := uploader.writer.Close(); err != nil {
+			return NewError(err, "Unable to Close object")
+		}
 
 		if err == io.EOF {
 			break
 		}
 	}
 
-	tracelog.DebugLogger.Printf("Put %v done\n", name)
-	if err := uploader.writer.Close(); err != nil {
-		return NewError(err, "Unable to Close object")
+	tracelog.InfoLogger.Printf("Compose file %v from chunks\n", object.ObjectName())
+
+	composeChunksFunc := func() error {
+		_, err := object.ComposerFrom(tmpChunks...).Run(ctx)
+		return err
 	}
+
+	if err := uploader.retry(ctx, composeChunksFunc); err != nil {
+		return NewError(err, "Unable to copy to object")
+	}
+
+	tracelog.InfoLogger.Printf("Remove temporary chunks for %v\n", object.ObjectName())
+
+	for _, tmpChunk := range tmpChunks {
+		removeTempChunksFunc := func() error { return tmpChunk.Delete(ctx) }
+		if err := uploader.retry(ctx, removeTempChunksFunc); err != nil {
+			return NewError(err, "Unable to delete temporary chunks")
+		}
+	}
+
+	tracelog.DebugLogger.Printf("Put %v done\n", name)
+
 	return nil
 }
 

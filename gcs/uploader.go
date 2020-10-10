@@ -18,7 +18,6 @@ const (
 
 type Uploader struct {
 	writer           *storage.Writer
-	objHandle        *storage.ObjectHandle
 	maxChunkSize     int64
 	writePosition    int64
 	baseRetryDelay   time.Duration
@@ -35,9 +34,8 @@ type chunk struct {
 	size  int
 }
 
-func NewUploader(writer *storage.Writer, objH *storage.ObjectHandle, options ...UploaderOptions) *Uploader {
+func NewUploader(writer *storage.Writer, options ...UploaderOptions) *Uploader {
 	u := &Uploader{
-		objHandle:        objH,
 		writer:           writer,
 		maxChunkSize:     defaultMaxChunkSize,
 		baseRetryDelay:   BaseRetryDelay,
@@ -60,23 +58,9 @@ func (u *Uploader) resetBuffer(b *[]byte) {
 	*b = u.allocateBuffer()
 }
 
-func (u *Uploader) uploadChunk(ctx context.Context, chunk chunk) error {
-	timer := time.NewTimer(u.baseRetryDelay)
-	defer func() {
-		timer.Stop()
-	}()
-
-	u.writePosition = 0
-
-	for retry := 0; retry <= u.maxUploadRetries; retry++ {
-		if retry > 0 && retry%5 == 0 {
-			if err := u.writer.Close(); err != nil {
-				tracelog.ErrorLogger.Printf("Error on close writer: %v", err)
-			}
-
-			u.writer = u.objHandle.NewWriter(ctx)
-			tracelog.InfoLogger.Println("Update writer")
-		}
+func (u *Uploader) upload(chunk chunk) func() error {
+	return func() error {
+		tracelog.InfoLogger.Printf("Upload %s, part %d\n", chunk.name, chunk.index)
 
 		bufReader := bytes.NewReader(chunk.data[u.writePosition:chunk.size])
 
@@ -87,7 +71,26 @@ func (u *Uploader) uploadChunk(ctx context.Context, chunk chunk) error {
 
 		u.writePosition += n
 
-		tracelog.ErrorLogger.Printf("Unable to copy to object %s, part %d, err: %v, retrying attempt %d", chunk.name, chunk.index, err, retry)
+		tracelog.ErrorLogger.Printf("Unable to copy to object %s, part %d, err: %v", chunk.name, chunk.index, err)
+		return err
+	}
+}
+
+func (u *Uploader) retry(ctx context.Context, retryFunc func() error) error {
+	timer := time.NewTimer(u.baseRetryDelay)
+	defer func() {
+		timer.Stop()
+	}()
+
+	u.writePosition = 0
+
+	for retry := 0; retry <= u.maxUploadRetries; retry++ {
+		err := retryFunc()
+		if err == nil {
+			return nil
+		}
+
+		tracelog.ErrorLogger.Printf("Failed to run a retriable func. Err: %v, retrying attempt %d", err, retry)
 
 		tempDelay := u.baseRetryDelay * time.Duration(math.Exp2(float64(retry)))
 		sleepInterval := minDuration(u.maxRetryDelay, getJitterDelay(tempDelay/2))
