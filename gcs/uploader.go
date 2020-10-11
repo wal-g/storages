@@ -17,9 +17,8 @@ const (
 )
 
 type Uploader struct {
-	writer           *storage.Writer
+	objHandle        *storage.ObjectHandle
 	maxChunkSize     int64
-	writePosition    int64
 	baseRetryDelay   time.Duration
 	maxRetryDelay    time.Duration
 	maxUploadRetries int
@@ -34,9 +33,9 @@ type chunk struct {
 	size  int
 }
 
-func NewUploader(writer *storage.Writer, options ...UploaderOptions) *Uploader {
+func NewUploader(objHandle *storage.ObjectHandle, options ...UploaderOptions) *Uploader {
 	u := &Uploader{
-		writer:           writer,
+		objHandle:        objHandle,
 		maxChunkSize:     defaultMaxChunkSize,
 		baseRetryDelay:   BaseRetryDelay,
 		maxRetryDelay:    maxRetryDelay,
@@ -54,38 +53,70 @@ func (u *Uploader) allocateBuffer() []byte {
 	return make([]byte, u.maxChunkSize)
 }
 
-func (u *Uploader) resetBuffer(b *[]byte) {
-	*b = u.allocateBuffer()
+// UploadChunk uploads ab object chunk to storage.
+func (u *Uploader) UploadChunk(ctx context.Context, chunk chunk) error {
+	return u.retry(ctx, u.getUploadFunc(chunk))
 }
 
-func (u *Uploader) upload(chunk chunk) func() error {
-	return func() error {
-		tracelog.InfoLogger.Printf("Upload %s, part %d\n", chunk.name, chunk.index)
+func (u *Uploader) getUploadFunc(chunk chunk) func(context.Context) error {
+	return func(ctx context.Context) error {
+		tracelog.DebugLogger.Printf("Upload %s, part %d\n", chunk.name, chunk.index)
 
-		bufReader := bytes.NewReader(chunk.data[u.writePosition:chunk.size])
+		writer := u.objHandle.NewWriter(ctx)
+		reader := bytes.NewReader(chunk.data[:chunk.size])
 
-		n, err := io.Copy(u.writer, bufReader)
+		defer func() {
+			if err := writer.Close(); err != nil {
+				tracelog.ErrorLogger.Printf("Unable to close object writer %s, part %d, err: %v", chunk.name, chunk.index, err)
+			}
+		}()
+
+		_, err := io.Copy(writer, reader)
 		if err == nil {
 			return nil
 		}
 
-		u.writePosition += n
+		tracelog.ErrorLogger.Printf("Unable to copy an object chunk %s, part %d, err: %v", chunk.name, chunk.index, err)
 
-		tracelog.ErrorLogger.Printf("Unable to copy to object %s, part %d, err: %v", chunk.name, chunk.index, err)
 		return err
 	}
 }
 
-func (u *Uploader) retry(ctx context.Context, retryFunc func() error) error {
+// ComposeObject composes an object from temporary chunks.
+func (u *Uploader) ComposeObject(ctx context.Context, tmpChunks []*storage.ObjectHandle) error {
+	return u.retry(ctx, u.getComposeFunc(tmpChunks))
+}
+
+func (u *Uploader) getComposeFunc(tmpChunks []*storage.ObjectHandle) func(context.Context) error {
+	return func(ctx context.Context) error {
+		_, err := u.objHandle.ComposerFrom(tmpChunks...).Run(ctx)
+		return err
+	}
+}
+
+// CleanUpChunks removes temporary chunks.
+func (u *Uploader) CleanUpChunks(ctx context.Context, tmpChunks []*storage.ObjectHandle) error {
+	for _, tmpChunk := range tmpChunks {
+		if err := u.retry(ctx, u.getCleanUpChunksFunc(tmpChunk)); err != nil {
+			return NewError(err, "Unable to delete a temporary chunk")
+		}
+	}
+
+	return nil
+}
+
+func (u *Uploader) getCleanUpChunksFunc(tmpChunk *storage.ObjectHandle) func(context.Context) error {
+	return func(ctx context.Context) error { return tmpChunk.Delete(ctx) }
+}
+
+func (u *Uploader) retry(ctx context.Context, retryableFunc func(ctx context.Context) error) error {
 	timer := time.NewTimer(u.baseRetryDelay)
 	defer func() {
 		timer.Stop()
 	}()
 
-	u.writePosition = 0
-
 	for retry := 0; retry <= u.maxUploadRetries; retry++ {
-		err := retryFunc()
+		err := retryableFunc(ctx)
 		if err == nil {
 			return nil
 		}

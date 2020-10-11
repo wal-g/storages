@@ -191,13 +191,15 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 	ctx, cancel := folder.createTimeoutContext()
 	defer cancel()
 
-	uploader := NewUploader(object.NewWriter(ctx))
-
 	chunkNum := 0
-	dataChunk := uploader.allocateBuffer()
 	tmpChunks := make([]*gcs.ObjectHandle, 0)
 
 	for {
+		tmpChunkName := folder.joinPath(name+"_chunks", "chunk"+strconv.Itoa(chunkNum))
+		objectChunk := folder.bucket.Object(folder.joinPath(folder.path, tmpChunkName))
+		chunkUploader := NewUploader(objectChunk)
+		dataChunk := chunkUploader.allocateBuffer()
+
 		n, err := fillBuffer(content, dataChunk)
 		if err != nil && err != io.EOF {
 			tracelog.ErrorLogger.Printf("Unable to read content of %s, err: %v", name, err)
@@ -208,10 +210,6 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 			break
 		}
 
-		tmpChunkName := folder.joinPath(name+"_chunks", "chunk"+strconv.Itoa(chunkNum))
-		objectChunk := folder.bucket.Object(folder.joinPath(folder.path, tmpChunkName))
-		uploader := NewUploader(objectChunk.NewWriter(ctx))
-
 		chunk := chunk{
 			name:  tmpChunkName,
 			index: chunkNum,
@@ -219,42 +217,30 @@ func (folder *Folder) PutObject(name string, content io.Reader) error {
 			size:  n,
 		}
 
-		if err := uploader.retry(ctx, uploader.upload(chunk)); err != nil {
-			return NewError(err, "Unable to copy to object")
+		if err := chunkUploader.UploadChunk(ctx, chunk); err != nil {
+			return NewError(err, "Unable to upload an object chunk")
 		}
 
 		tmpChunks = append(tmpChunks, objectChunk)
 
 		chunkNum++
-		uploader.resetBuffer(&dataChunk)
-
-		if err := uploader.writer.Close(); err != nil {
-			return NewError(err, "Unable to Close object")
-		}
 
 		if err == io.EOF {
 			break
 		}
 	}
 
-	tracelog.InfoLogger.Printf("Compose file %v from chunks\n", object.ObjectName())
+	tracelog.DebugLogger.Printf("Compose file %v from chunks\n", object.ObjectName())
 
-	composeChunksFunc := func() error {
-		_, err := object.ComposerFrom(tmpChunks...).Run(ctx)
-		return err
+	uploader := NewUploader(object)
+	if err := uploader.ComposeObject(ctx, tmpChunks); err != nil {
+		return NewError(err, "Unable to compose object")
 	}
 
-	if err := uploader.retry(ctx, composeChunksFunc); err != nil {
-		return NewError(err, "Unable to copy to object")
-	}
+	tracelog.DebugLogger.Printf("Remove temporary chunks for %v\n", object.ObjectName())
 
-	tracelog.InfoLogger.Printf("Remove temporary chunks for %v\n", object.ObjectName())
-
-	for _, tmpChunk := range tmpChunks {
-		removeTempChunksFunc := func() error { return tmpChunk.Delete(ctx) }
-		if err := uploader.retry(ctx, removeTempChunksFunc); err != nil {
-			return NewError(err, "Unable to delete temporary chunks")
-		}
+	if err := uploader.CleanUpChunks(ctx, tmpChunks); err != nil {
+		return NewError(err, "Unable to delete temporary chunks")
 	}
 
 	tracelog.DebugLogger.Printf("Put %v done\n", name)
