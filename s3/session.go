@@ -1,21 +1,20 @@
 package s3
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/defaults"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/pkg/errors"
-	"github.com/wal-g/tracelog"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/pkg/errors"
+	"github.com/wal-g/tracelog"
 )
 
 const DefaultPort = "443"
@@ -82,40 +81,14 @@ func setupReqProxy(endpointSource, port string) *string {
 	return nil
 }
 
-func getDefaultConfig(settings map[string]string) *aws.Config {
+func configWithSettings(config *aws.Config, bucket string, settings map[string]string) (*aws.Config, error) {
 	// DefaultRetryer implements basic retry logic using exponential backoff for
 	// most services. If you want to implement custom retry logic, you can implement the
 	// request.Retryer interface.
-	config := defaults.Get().Config.WithRegion(settings[RegionSetting])
 	config = request.WithRetryer(config, client.DefaultRetryer{NumMaxRetries: MaxRetries})
-
-	provider := &credentials.StaticProvider{Value: credentials.Value{
-		AccessKeyID:     getFirstSettingOf(settings, []string{AccessKeyIdSetting, AccessKeySetting}),
-		SecretAccessKey: getFirstSettingOf(settings, []string{SecretAccessKeySetting, SecretKeySetting}),
-		SessionToken:    settings[SessionTokenSetting],
-	}}
-	providers := make([]credentials.Provider, 0)
-	providers = append(providers, provider)
-	providers = append(providers, defaults.CredProviders(config, defaults.Handlers())...)
-	newCredentials := credentials.NewCredentials(&credentials.ChainProvider{
-		VerboseErrors: aws.BoolValue(config.CredentialsChainVerboseErrors),
-		Providers:     providers,
-	})
-
-	config = config.WithCredentials(newCredentials)
 
 	if endpoint, ok := settings[EndpointSetting]; ok {
 		config = config.WithEndpoint(endpoint)
-	}
-	return config
-}
-
-// TODO : unit tests
-func createSession(bucket string, settings map[string]string) (*session.Session, error) {
-	config := getDefaultConfig(settings)
-	config.MaxRetries = &MaxRetries
-	if _, err := config.Credentials.Get(); err != nil {
-		return nil, errors.Wrapf(err, "failed to get AWS credentials; please specify %s and %s", AccessKeyIdSetting, SecretAccessKeySetting)
 	}
 
 	if s3ForcePathStyleStr, ok := settings[ForcePathStyleSetting]; ok {
@@ -132,34 +105,45 @@ func createSession(bucket string, settings map[string]string) (*session.Session,
 	}
 	config = config.WithRegion(region)
 
+	return config, nil
+}
+
+// TODO : unit tests
+func createSession(bucket string, settings map[string]string) (*session.Session, error) {
+	s, err := session.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := configWithSettings(s.Config, bucket, settings)
+	if err != nil {
+		return nil, err
+	}
+	s.Config = c
+
 	filePath := settings[s3CertFile]
 	if filePath != "" {
 		if file, err := os.Open(filePath); err == nil {
 			defer file.Close()
-			s, err := session.NewSessionWithOptions(session.Options{Config: *config, CustomCABundle: file})
+			s, err := session.NewSessionWithOptions(session.Options{Config: *s.Config, CustomCABundle: file})
 			return s, err
 		} else {
 			return nil, err
 		}
 	}
 
-	s, err := session.NewSession(config)
-
-	if err != nil {
-		return nil, err
-	}
 	if endpointSource, ok := settings[EndpointSourceSetting]; ok {
 		s.Handlers.Validate.PushBack(func(request *request.Request) {
 			src := setupReqProxy(endpointSource, getEndpointPort(settings))
 			if src != nil {
 				tracelog.DebugLogger.Printf("using endpoint %s", *src)
-				host := strings.TrimPrefix(*config.Endpoint, "https://")
+				host := strings.TrimPrefix(*s.Config.Endpoint, "https://")
 				request.HTTPRequest.Host = host
 				request.HTTPRequest.Header.Add("Host", host)
 				request.HTTPRequest.URL.Host = *src
 				request.HTTPRequest.URL.Scheme = HTTP
 			} else {
-				tracelog.DebugLogger.Printf("using endpoint %s", *config.Endpoint)
+				tracelog.DebugLogger.Printf("using endpoint %s", *s.Config.Endpoint)
 			}
 		})
 	}
