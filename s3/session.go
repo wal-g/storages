@@ -104,6 +104,17 @@ func getDefaultConfig(settings map[string]string) *aws.Config {
 
 	config = config.WithCredentials(newCredentials)
 
+	if logLevel, ok := settings[LogLevel]; ok {
+		config = config.WithLogLevel(func(s string) aws.LogLevelType {
+			switch s {
+			case "DEVEL":
+				return aws.LogDebug
+			default:
+				return aws.LogOff
+			}
+		}(logLevel))
+	}
+
 	if endpoint, ok := settings[EndpointSetting]; ok {
 		config = config.WithEndpoint(endpoint)
 	}

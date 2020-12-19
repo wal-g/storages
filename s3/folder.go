@@ -31,6 +31,7 @@ const (
 	MaxPartSize              = "S3_MAX_PART_SIZE"
 	EndpointSourceSetting    = "S3_ENDPOINT_SOURCE"
 	EndpointPortSetting      = "S3_ENDPOINT_PORT"
+	LogLevel                 = "S3_LOG_LEVEL"
 )
 
 var (
