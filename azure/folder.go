@@ -13,6 +13,7 @@ import (
 	"github.com/wal-g/tracelog"
 
 	"github.com/Azure/azure-storage-blob-go/azblob"
+	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/pkg/errors"
 )
 
@@ -20,6 +21,7 @@ const (
 	AccountSetting    = "AZURE_STORAGE_ACCOUNT"
 	AccessKeySetting  = "AZURE_STORAGE_ACCESS_KEY"
 	SasTokenSetting   = "AZURE_STORAGE_SAS_TOKEN"
+	EnvironmentName   = "AZURE_ENVIRONMENT_NAME"
 	BufferSizeSetting = "AZURE_BUFFER_SIZE"
 	MaxBuffersSetting = "AZURE_MAX_BUFFERS"
 	TryTimeoutSetting = "AZURE_TRY_TIMEOUT"
@@ -34,6 +36,7 @@ var SettingList = []string{
 	AccountSetting,
 	AccessKeySetting,
 	SasTokenSetting,
+	EnvironmentName,
 	BufferSizeSetting,
 	MaxBuffersSetting,
 }
@@ -55,7 +58,7 @@ func NewFolder(
 }
 
 func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder, error) {
-	var accountName, accountKey, accountToken string
+	var accountName, accountKey, accountToken, environmentName string
 	var ok, usingToken bool
 	if accountName, ok = settings[AccountSetting]; !ok {
 		return nil, NewCredentialError(AccountSetting)
@@ -65,11 +68,14 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 			return nil, NewCredentialError(AccessKeySetting)
 		}
 	}
+	if environmentName, ok = settings[EnvironmentName]; !ok {
+		environmentName = "AzurePublicCloud"
+	}
 
 	var credential azblob.Credential
 	var err error
 	if usingToken {
-		credential = azblob.NewAnonymousCredential();
+		credential = azblob.NewAnonymousCredential()
 	} else {
 		credential, err = azblob.NewSharedKeyCredential(accountName, accountKey)
 		if err != nil {
@@ -93,14 +99,26 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 		return nil, NewFolderError(err, "Unable to create container")
 	}
 
+	var storageEndpointSuffix string
+	switch environmentName {
+	case "AzureUSGovernmentCloud":
+		storageEndpointSuffix = azure.USGovernmentCloud.StorageEndpointSuffix
+	case "AzureChinaCloud":
+		storageEndpointSuffix = azure.ChinaCloud.StorageEndpointSuffix
+	case "AzureGermanCloud":
+		storageEndpointSuffix = azure.GermanCloud.StorageEndpointSuffix
+	default:
+		storageEndpointSuffix = azure.PublicCloud.StorageEndpointSuffix
+	}
+
 	var serviceURL *url.URL
 	if usingToken {
-		serviceURL, err = url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net/%s%s", accountName, containerName, accountToken))
+		serviceURL, err = url.Parse(fmt.Sprintf("https://%s.blob.%s/%s%s", accountName, storageEndpointSuffix, containerName, accountToken))
 		if err != nil {
 			return nil, NewFolderError(err, "Unable to parse service URL with SAS token")
 		}
 	} else {
-		serviceURL, err = url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net/%s", accountName, containerName))
+		serviceURL, err = url.Parse(fmt.Sprintf("https://%s.blob.%s/%s", accountName, storageEndpointSuffix, containerName))
 		if err != nil {
 			return nil, NewFolderError(err, "Unable to parse service URL")
 		}
