@@ -30,6 +30,7 @@ const (
 	minBuffers        = 1
 	defaultBuffers    = 3
 	defaultTryTimeout = 5
+	defaultEnvName    = "AzurePublicCloud"
 )
 
 var SettingList = []string{
@@ -69,7 +70,7 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 		}
 	}
 	if environmentName, ok = settings[EnvironmentName]; !ok {
-		environmentName = "AzurePublicCloud"
+		environmentName = defaultEnvName
 	}
 
 	var credential azblob.Credential
@@ -99,17 +100,7 @@ func ConfigureFolder(prefix string, settings map[string]string) (storage.Folder,
 		return nil, NewFolderError(err, "Unable to create container")
 	}
 
-	var storageEndpointSuffix string
-	switch environmentName {
-	case "AzureUSGovernmentCloud":
-		storageEndpointSuffix = azure.USGovernmentCloud.StorageEndpointSuffix
-	case "AzureChinaCloud":
-		storageEndpointSuffix = azure.ChinaCloud.StorageEndpointSuffix
-	case "AzureGermanCloud":
-		storageEndpointSuffix = azure.GermanCloud.StorageEndpointSuffix
-	default:
-		storageEndpointSuffix = azure.PublicCloud.StorageEndpointSuffix
-	}
+	storageEndpointSuffix := getStorageEndpointSuffix(environmentName)
 
 	var serviceURL *url.URL
 	if usingToken {
@@ -253,4 +244,22 @@ func getUploadStreamToBlockBlobOptions(settings map[string]string) azblob.Upload
 		maxBuffers = defaultBuffers
 	}
 	return azblob.UploadStreamToBlockBlobOptions{MaxBuffers: maxBuffers, BufferSize: bufferSize}
+}
+
+// Function will get environment's name and return string with the environment's Azure storage account endpoint suffix.
+// Expected names AzureUSGovernmentCloud, AzureChinaCloud, AzureGermanCloud. If any other name is used the func will return
+// the Azure storage account endpoint suffix for AzurePublicCloud.
+func getStorageEndpointSuffix(environmentName string) string {
+	var storageEndpointSuffix string
+	switch environmentName {
+	case "AzureUSGovernmentCloud":
+		storageEndpointSuffix = azure.USGovernmentCloud.StorageEndpointSuffix
+	case "AzureChinaCloud":
+		storageEndpointSuffix = azure.ChinaCloud.StorageEndpointSuffix
+	case "AzureGermanCloud":
+		storageEndpointSuffix = azure.GermanCloud.StorageEndpointSuffix
+	default:
+		storageEndpointSuffix = azure.PublicCloud.StorageEndpointSuffix
+	}
+	return storageEndpointSuffix
 }
