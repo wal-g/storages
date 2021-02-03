@@ -252,11 +252,11 @@ func getUploadStreamToBlockBlobOptions(settings map[string]string) azblob.Upload
 func getStorageEndpointSuffix(environmentName string) string {
 	var storageEndpointSuffix string
 	switch environmentName {
-	case "AzureUSGovernmentCloud":
+	case azure.USGovernmentCloud.Name:
 		storageEndpointSuffix = azure.USGovernmentCloud.StorageEndpointSuffix
-	case "AzureChinaCloud":
+	case azure.ChinaCloud.Name:
 		storageEndpointSuffix = azure.ChinaCloud.StorageEndpointSuffix
-	case "AzureGermanCloud":
+	case azure.GermanCloud.Name:
 		storageEndpointSuffix = azure.GermanCloud.StorageEndpointSuffix
 	default:
 		storageEndpointSuffix = azure.PublicCloud.StorageEndpointSuffix
