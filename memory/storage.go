@@ -42,6 +42,10 @@ func (storage *Storage) Load(key string) (value TimeStampedData, exists bool) {
 	return valueInterface.(TimeStampedData), ok
 }
 
+func (storage *Storage) StoreWithCustomTimeStamp(key string, value bytes.Buffer, time TimeStampedData) {
+	storage.underlying.Store(key, time)
+}
+
 func (storage *Storage) Store(key string, value bytes.Buffer) {
 	storage.underlying.Store(key, TimeStampData(value))
 }

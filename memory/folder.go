@@ -72,11 +72,28 @@ func (folder *Folder) ReadObject(objectRelativePath string) (io.ReadCloser, erro
 	return ioutil.NopCloser(&object.Data), nil
 }
 
-func (folder *Folder) PutObject(name string, content io.Reader) error {
+func (folder *Folder) putObjectInner(name string, content io.Reader) (string, []byte, error) {
 	data, err := ioutil.ReadAll(content)
 	objectPath := folder.path + name
 	if err != nil {
-		return errors.Wrapf(err, "failed to put '%s' in memory storage", objectPath)
+		return "", nil, errors.Wrapf(err, "failed to put '%s' in memory storage", objectPath)
+	}
+	return objectPath, data, err
+}
+
+func (folder *Folder) PutObjectWithCustomTimeStamp(name string, content io.Reader, time TimeStampedData) error {
+	objectPath, data, err := folder.putObjectInner(name, content)
+	if err != nil {
+		return err
+	}
+	folder.Storage.StoreWithCustomTimeStamp(objectPath, *bytes.NewBuffer(data), time)
+	return nil
+}
+
+func (folder *Folder) PutObject(name string, content io.Reader) error {
+	objectPath, data, err := folder.putObjectInner(name, content)
+	if err != nil {
+		return err
 	}
 	folder.Storage.Store(objectPath, *bytes.NewBuffer(data))
 	return nil
