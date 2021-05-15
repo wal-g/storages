@@ -40,6 +40,7 @@ var SettingList = []string{
 	EnvironmentName,
 	BufferSizeSetting,
 	MaxBuffersSetting,
+	TryTimeoutSetting,
 }
 
 func NewFolderError(err error, format string, args ...interface{}) storage.Error {
