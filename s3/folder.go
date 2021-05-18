@@ -53,6 +53,7 @@ var (
 		SecretKeySetting,
 		SessionTokenSetting,
 		SseSetting,
+		SseCSetting,
 		SseKmsIdSetting,
 		StorageClassSetting,
 		UploadConcurrencySetting,
