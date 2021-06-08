@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+  "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ const HTTP = "http"
 
 // TODO : unit tests
 // Given an S3 bucket name, attempt to determine its region
-func findBucketRegion(bucket string, config *aws.Config) (string, error) {
+var findBucketRegion = func(bucket string, config *aws.Config) (string, error) {
 	input := s3.GetBucketLocationInput{
 		Bucket: aws.String(bucket),
 	}
@@ -47,13 +48,35 @@ func findBucketRegion(bucket string, config *aws.Config) (string, error) {
 }
 
 // TODO : unit tests
-func getAWSRegion(s3Bucket string, config *aws.Config, settings map[string]string) (string, error) {
+func GetAWSRegion(s3Bucket string, config *aws.Config, settings map[string]string) (string, error) {
 	if region, ok := settings[RegionSetting]; ok {
 		return region, nil
 	}
+
 	if config.Endpoint == nil ||
-		*config.Endpoint == "" ||
-		strings.HasSuffix(*config.Endpoint, ".amazonaws.com") {
+		*config.Endpoint == "" {
+
+		if config.Endpoint != nil {
+			hostAddr, parseErr := url.Parse(*config.Endpoint)
+
+			if parseErr != nil {
+				return "us-east-1", parseErr
+			}
+
+			host, _, err := net.SplitHostPort(hostAddr.Host)
+
+			if err != nil {
+				return "us-east-1", err
+			}
+
+			if strings.HasSuffix(host, ".amazonaws.com") {
+				region, err := findBucketRegion(s3Bucket, config)
+				return region, errors.Wrapf(err, "%s is not set and s3:GetBucketLocation failed", RegionSetting)
+			}
+
+			return "us-east-1", nil
+		}
+
 		region, err := findBucketRegion(s3Bucket, config)
 		return region, errors.Wrapf(err, "%s is not set and s3:GetBucketLocation failed", RegionSetting)
 	} else {
@@ -122,7 +145,7 @@ func createSession(bucket string, settings map[string]string) (*session.Session,
 		config.S3ForcePathStyle = aws.Bool(s3ForcePathStyle)
 	}
 
-	region, err := getAWSRegion(bucket, config, settings)
+	region, err := GetAWSRegion(bucket, config, settings)
 	if err != nil {
 		return nil, err
 	}
